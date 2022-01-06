@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// l1nkkk: set(key, value) by StandAloneStorage obj
 func Set(s *standalone_storage.StandAloneStorage, cf string, key []byte, value []byte) error {
 	return s.Write(nil, []storage.Modify{
 		{
@@ -24,6 +25,7 @@ func Set(s *standalone_storage.StandAloneStorage, cf string, key []byte, value [
 	})
 }
 
+// l1nkkk: get(key) by StandAloneStorage obj
 func Get(s *standalone_storage.StandAloneStorage, cf string, key []byte) ([]byte, error) {
 	reader, err := s.Reader(nil)
 	if err != nil {
@@ -32,6 +34,7 @@ func Get(s *standalone_storage.StandAloneStorage, cf string, key []byte) ([]byte
 	return reader.GetCF(cf, key)
 }
 
+// l1nkkk: return iter(cf) by StandAloneStorage obj
 func Iter(s *standalone_storage.StandAloneStorage, cf string) (engine_util.DBIterator, error) {
 	reader, err := s.Reader(nil)
 	if err != nil {
@@ -40,6 +43,7 @@ func Iter(s *standalone_storage.StandAloneStorage, cf string) (engine_util.DBIte
 	return reader.IterCF(cf), nil
 }
 
+// l1nkkk: 删除测试数据
 func cleanUpTestData(conf *config.Config) error {
 	if conf != nil {
 		return os.RemoveAll(conf.DBPath)
@@ -50,6 +54,7 @@ func cleanUpTestData(conf *config.Config) error {
 func TestRawGet1(t *testing.T) {
 	conf := config.NewTestConfig()
 	s := standalone_storage.NewStandAloneStorage(conf)
+
 	s.Start()
 	server := NewServer(s)
 	defer cleanUpTestData(conf)
