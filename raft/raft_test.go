@@ -24,6 +24,7 @@ import (
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
 
+
 // returns a new MemoryStorage with only ents filled
 func newMemoryStorageWithEnts(ents []pb.Entry) *MemoryStorage {
 	return &MemoryStorage{
@@ -33,6 +34,7 @@ func newMemoryStorageWithEnts(ents []pb.Entry) *MemoryStorage {
 }
 
 // nextEnts returns the appliable entries and updates the applied index
+//
 func nextEnts(r *Raft, s *MemoryStorage) (ents []pb.Entry) {
 	// Transfer all unstable entries to "stable" storage.
 	s.Append(r.RaftLog.unstableEntries())
@@ -44,8 +46,8 @@ func nextEnts(r *Raft, s *MemoryStorage) (ents []pb.Entry) {
 }
 
 type stateMachine interface {
-	Step(m pb.Message) error
-	readMessages() []pb.Message
+	Step(m pb.Message) error		// 将msg灌入 sm
+	readMessages() []pb.Message		// 从raft中读取msg
 }
 
 func (r *Raft) readMessages() []pb.Message {
@@ -1544,14 +1546,16 @@ func votedWithConfig(configFunc func(*Config), vote, term uint64) *Raft {
 	return sm
 }
 
+// network 用来模拟一个网络中的集群
 type network struct {
-	peers   map[uint64]stateMachine
-	storage map[uint64]*MemoryStorage
-	dropm   map[connem]float64
-	ignorem map[pb.MessageType]bool
+	peers   map[uint64]stateMachine		// sm
+	storage map[uint64]*MemoryStorage	// 灌入sm的数据
+	dropm   map[connem]float64			// 暂时不管
+	ignorem map[pb.MessageType]bool		// 暂时不管
 
 	// msgHook is called for each message sent. It may inspect the
 	// message and return true to send it or false to drop it.
+	// 理解为检查 msg 的中间件
 	msgHook func(pb.Message) bool
 }
 

@@ -1,5 +1,7 @@
 package config
 
+// l1nkkk: 配置数据文件
+
 import (
 	"fmt"
 	"time"
