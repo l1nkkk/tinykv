@@ -24,7 +24,6 @@ import (
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
 
-
 // returns a new MemoryStorage with only ents filled
 func newMemoryStorageWithEnts(ents []pb.Entry) *MemoryStorage {
 	return &MemoryStorage{
@@ -46,8 +45,8 @@ func nextEnts(r *Raft, s *MemoryStorage) (ents []pb.Entry) {
 }
 
 type stateMachine interface {
-	Step(m pb.Message) error		// 将msg灌入 sm
-	readMessages() []pb.Message		// 从raft中读取msg
+	Step(m pb.Message) error    // 将msg灌入 Raft
+	readMessages() []pb.Message // 从raft中读取msg
 }
 
 func (r *Raft) readMessages() []pb.Message {
@@ -76,10 +75,12 @@ func TestProgressLeader2AB(t *testing.T) {
 
 func TestLeaderElection2AA(t *testing.T) {
 	var cfg func(*Config)
+
+	// 5个测试集群
 	tests := []struct {
-		*network
-		state   StateType
-		expTerm uint64
+		*network           // 集群
+		state    StateType // 期望结果
+		expTerm  uint64    // 期望的  term 值
 	}{
 		{newNetworkWithConfig(cfg, nil, nil, nil), StateLeader, 1},
 		{newNetworkWithConfig(cfg, nil, nil, nopStepper), StateLeader, 1},
@@ -89,7 +90,10 @@ func TestLeaderElection2AA(t *testing.T) {
 	}
 
 	for i, tt := range tests {
+		// 给目标节点to发送该消息MsgHup
 		tt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
+
+		// 判断每个集群中node=1的Raft中的状态是否改变
 		sm := tt.network.peers[1].(*Raft)
 		if sm.State != tt.state {
 			t.Errorf("#%d: state = %s, want %s", i, sm.State, tt.state)
@@ -1548,10 +1552,10 @@ func votedWithConfig(configFunc func(*Config), vote, term uint64) *Raft {
 
 // network 用来模拟一个网络中的集群
 type network struct {
-	peers   map[uint64]stateMachine		// sm
-	storage map[uint64]*MemoryStorage	// 灌入sm的数据
-	dropm   map[connem]float64			// 暂时不管
-	ignorem map[pb.MessageType]bool		// 暂时不管
+	peers   map[uint64]stateMachine   // sm
+	storage map[uint64]*MemoryStorage // 灌入sm的数据
+	dropm   map[connem]float64        // 暂时不管
+	ignorem map[pb.MessageType]bool   // 暂时不管
 
 	// msgHook is called for each message sent. It may inspect the
 	// message and return true to send it or false to drop it.

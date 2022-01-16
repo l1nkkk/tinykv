@@ -18,10 +18,13 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
@@ -127,3 +130,17 @@ func IsResponseMsg(msgt pb.MessageType) bool {
 func isHardStateEqual(a, b pb.HardState) bool {
 	return a.Term == b.Term && a.Vote == b.Vote && a.Commit == b.Commit
 }
+
+type randWrap struct {
+	rand.Rand
+	once sync.Once
+}
+
+func getRandWrap() *randWrap {
+	randWrapSingle.once.Do(func() {
+		randWrapSingle.Seed(time.Now().UnixNano())
+	})
+	return &randWrapSingle
+}
+
+var randWrapSingle randWrap

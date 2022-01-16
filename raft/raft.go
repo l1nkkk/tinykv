@@ -16,6 +16,9 @@ package raft
 
 import (
 	"errors"
+	"github.com/pingcap-incubator/tinykv/log"
+	"os"
+	"runtime"
 
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
@@ -120,6 +123,18 @@ func (c *Config) validate() error {
 		return errors.New("storage cannot be nil")
 	}
 
+	// add by l1nkkk
+	// 不能同时出现 peers 和 stroge 中的 ConfState
+	if len(c.peers) != 0 {
+		if _, cs, err := c.Storage.InitialState(); err != nil {
+			return err
+		} else {
+			if len(cs.Nodes) != 0 {
+				return errors.New("conflict between peers and Storage")
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -178,7 +193,8 @@ type Raft struct {
 	// number of ticks since it reached last heartbeatTimeout.
 	// only leader keeps heartbeatElapsed.
 	//
-	// heartbeatElapsed 当前的心跳计时器，表示距离上一次心跳已经过了多少ticks
+	// heartbeatElapsed 当前的心跳计时器，表示距离上一次心跳已经过了多少ticks.
+	// 只有leader才会使用
 	heartbeatElapsed int
 
 	// Ticks since it reached last electionTimeout when it is leader or candidate.
@@ -207,14 +223,26 @@ type Raft struct {
 	//
 	// PendingConfIndex 用于配置动态变更，暂时不管，这是3a的
 	PendingConfIndex uint64
+
+	// ====add by l1nkkk
+	msgStep             *MsgStep
+	randElectionTimeout int
+	logger              *log.Logger
 }
 
 // newRaft return a raft peer with the given config
 func newRaft(c *Config) *Raft {
 	var (
-		r *Raft
+		r         *Raft
+		hardState pb.HardState
+		confState pb.ConfState
+		peers     []uint64
+		err       error
 	)
-	if err := c.validate(); err != nil {
+	if err = c.validate(); err != nil {
+		panic(err.Error())
+	}
+	if hardState, confState, err = c.Storage.InitialState(); err != nil {
 		panic(err.Error())
 	}
 
@@ -222,10 +250,12 @@ func newRaft(c *Config) *Raft {
 	// 1. 初始化固定的几个变量
 	r = &Raft{
 		id:               c.ID,
-		Term:             0,
-		Vote:             None,
+		Term:             hardState.Term,
+		Vote:             hardState.Vote,
 		heartbeatTimeout: c.HeartbeatTick,
 		electionTimeout:  c.ElectionTick,
+		heartbeatElapsed: 0,
+		electionElapsed:  0,
 		State:            StateFollower, // 刚启动先将其设置为 follower
 		Lead:             None,
 	}
@@ -233,20 +263,36 @@ func newRaft(c *Config) *Raft {
 	// 2. 初始化RaftLog
 	r.RaftLog = newLog(c.Storage)
 	r.RaftLog.applied = c.Applied
+	r.RaftLog.committed = hardState.Commit
 
 	// 3. 初始化process
-	for _, id := range c.peers {
+	r.Prs = make(map[uint64]*Progress)
+	if len(c.peers) != 0 {
+		peers = c.peers
+	} else {
+		peers = confState.Nodes
+	}
+	for _, id := range peers {
 		r.Prs[id] = &Progress{
 			Match: 0,
 			Next:  r.RaftLog.LastIndex() + 1,
 		}
 	}
 
+	// 4. init logger
+	r.logger = log.NewLogger(os.Stderr, "RaftLog: ")
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+	log.SetHighlighting(runtime.GOOS != "windows")
+
+	// 5. init msgStep
+	r.msgStep = CreateMsgStep()
 	return r
 }
 
 // sendAppend sends an append RPC with new entries (if any) and the
 // current commit index to the given peer. Returns true if a message was sent.
+//
+// 向节点发送 addMsg
 func (r *Raft) sendAppend(to uint64) bool {
 	// Your Code Here (2A).
 	return false
@@ -265,34 +311,32 @@ func (r *Raft) tick() {
 // becomeFollower transform this peer's state to Follower
 func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	// Your Code Here (2A).
+	r.resetState(term, lead, StateFollower)
 }
 
 // becomeCandidate transform this peer's state to candidate
 func (r *Raft) becomeCandidate() {
 	// Your Code Here (2A).
+	r.resetState(r.Term+1, None, StateCandidate)
 }
 
 // becomeLeader transform this peer's state to leader
 func (r *Raft) becomeLeader() {
 	// Your Code Here (2A).
 	// NOTE: Leader should propose a noop entry on its term
+	// 1. reset State
+	r.resetState(r.Term, r.id, StateLeader)
 
-	// 修改状态
-	r.State = StateLeader
-	// 发送一个 dumy log entry，促使之前任期未提交的数据可以提交
-
+	// TODO: 2. propose dumy entries
+	//r.RaftLog.
 }
 
 // Step the entrance of handle message, see `MessageType`
 // on `eraftpb.proto` for what msgs should be handled
 func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
-	switch r.State {
-	case StateFollower:
-	case StateCandidate:
-	case StateLeader:
-	}
-	return nil
+	// l1nkkk: etcd 中 Raft 承担了太多职责，这里把处理 msg 的职责分了出去
+	return r.msgStep.Step(r, &m)
 }
 
 // handleAppendEntries handle AppendEntries RPC request
@@ -318,4 +362,79 @@ func (r *Raft) addNode(id uint64) {
 // removeNode remove a node from raft group
 func (r *Raft) removeNode(id uint64) {
 	// Your Code Here (3A).
+}
+
+// ============add by l1nkkk
+
+func (r *Raft) stepLeader(m *pb.Message) {
+	switch {
+
+	}
+}
+
+func (r *Raft) stepFolloer(m *pb.Message)   {}
+func (r *Raft) stepCandidate(m *pb.Message) {}
+
+// 竞选 leader
+func (r *Raft) campaign() error {
+	// 1. become candidate
+	r.becomeCandidate()
+
+	// 2-1. 如果是单节点，直接成为 leader
+	if len(r.Prs) == 1 {
+		r.becomeLeader()
+	}
+
+	// 2-2. 群发preVote
+	for toid := range r.Prs {
+		if toid == r.id {
+			continue
+		}
+		r.send(pb.Message{
+			From:    r.id,
+			To:      toid,
+			MsgType: pb.MessageType_MsgRequestVote,
+			Index:   r.RaftLog.LastIndex(),
+			Term:    r.RaftLog.LastTerm(),
+		})
+	}
+}
+
+// 设置 msg 的 term， 并将其 append 到 msg slice。
+// 所有发送的日志都调用这个，可以统一做一些管理，比如日志。
+func (r *Raft) send(msg pb.Message) {
+	r.logger.Debugf("Addend msg in node%d ：%v", r.id, msg.String())
+	msg.Term = r.Term
+	r.msgs = append(r.msgs, msg)
+}
+
+// 重置raft状态
+func (r *Raft) resetState(term uint64, newLead uint64, s StateType) {
+
+	// 1. update term 、voteFor of hardState
+	if r.Term != term {
+		r.Term = term
+		r.Vote = None
+	}
+
+	// 2. update value about time
+	r.electionElapsed = 0
+	r.heartbeatElapsed = 0
+	r.resetRandElectionTimeout()
+
+	// 3. clear vote record and currentLead
+	r.votes = make(map[uint64]bool)
+	r.Lead = newLead
+
+	r.State = s
+
+	// 4. reset progresses？
+	//for _, p := range r.Prs {
+	//	p.Next = r
+	//}
+
+}
+
+func (r *Raft) resetRandElectionTimeout() {
+	r.randElectionTimeout = r.electionTimeout + getRandWrap().Intn(r.electionTimeout)
 }

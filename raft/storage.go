@@ -24,6 +24,8 @@ import (
 
 // ErrCompacted is returned by Storage.Entries/Compact when a requested
 // index is unavailable because it predates the last snapshot.
+//
+// 当参数中的 index 由于已被压缩不可用时，返回该错误
 var ErrCompacted = errors.New("requested index is unavailable due to compaction")
 
 // ErrSnapOutOfDate is returned by Storage.CreateSnapshot when a requested
@@ -73,7 +75,7 @@ type Storage interface {
 
 	// LastIndex returns the index of the last entry in the log.
 	//
-	// 最后一条log_entry 的 index
+	// 最后一条log_entry 的 index，当 log_entries 为空，返回 snapshot 的 lastindex
 	LastIndex() (uint64, error)
 
 	// FirstIndex returns the index of the first log entry that is
@@ -81,7 +83,8 @@ type Storage interface {
 	// into the latest Snapshot; if storage only contains the dummy entry the
 	// first log entry is not available).
 	//
-	// 持久化的log_entries 中，第一条 log_entry 的 index
+	// 第一条 log_entry 的 index，当 log_entries 为空，FirstIndex 不可用，
+	// 此时返回{0，ErrUnavailable}
 	FirstIndex() (uint64, error)
 	// Snapshot returns the most recent snapshot.
 	// If snapshot is temporarily unavailable, it should return ErrSnapshotTemporarilyUnavailable,
@@ -187,10 +190,15 @@ func (ms *MemoryStorage) lastIndex() uint64 {
 func (ms *MemoryStorage) FirstIndex() (uint64, error) {
 	ms.Lock()
 	defer ms.Unlock()
+	// update by l1nkkk
+	if len(ms.ents) == 1 {
+		return 0, ErrUnavailable
+	}
 	return ms.firstIndex(), nil
 }
 
 func (ms *MemoryStorage) firstIndex() uint64 {
+
 	return ms.ents[0].Index + 1
 }
 
@@ -245,7 +253,6 @@ func (ms *MemoryStorage) CreateSnapshot(i uint64, cs *pb.ConfState, data []byte)
 	if i > ms.lastIndex() {
 		log.Panicf("snapshot %d is out of bound lastindex(%d)", i, ms.lastIndex())
 	}
-
 
 	// 3. 更新 ms.snapshot
 	ms.snapshot.Metadata.Index = i
